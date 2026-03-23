@@ -16,6 +16,10 @@ Proposed Architecture: I propose an MLP architecture to perform this regression 
 
 Evaluation Plan: Root mean square error and mean absolute errors will quantify the error in DBTT shift, and an R-squared score will assess the variance captured compared to Nuclear Regulatory Commission (NRC) values (Eason et al. 2013). K-fold cross validation will be used to ensure stability across the dataset. Predicted vs measured plots will be analyzed to identify biases. 
 
+Prior work: Previous research on reactor pressure vessel embrittlement has mainly used semi-empirical and physics-based models based on surveillance data. These methods link DBTT shift to factors such as material composition and irradiation conditions. Our project builds on this work by exploring whether an MLP can capture these relationships more flexibly.
+The team has prior experience developing machine learning pipelines, including data preprocessing, feature engineering, and model optimization, which is directly applicable to the data preparation and training workflow required here.
+
+
 Reference: 
 
 Eason, E. D., et al. (2013). A Physically Based Correlation of Irradiation-Induced Transition Temperature Shift for Reactor Pressure Vessel Steals. NRC Report. 
