@@ -6,83 +6,33 @@ from sklearn.model_selection import KFold
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from model import MLPRegressor
 
-DEFAULT_CONFIG = {
-    "epochs": 1500,
-    "lr": 0.001,
-    "weight_decay": 0.0,
-    "dropout_rate": 0.0,
-    "optimizer": "adam",
-    "scheduler": None,
-    "init": "kaiming",
-}
-
+EPOCHS = 1500
+LR = 0.001
 N_SPLITS = 5
 
-def init_weights(model, method):
-    for m in model.modules():
-        if isinstance(m, nn.Linear):
-            if method == "kaiming":
-                nn.init.kaiming_uniform_(m.weight)
-            elif method == "xavier":
-                nn.init.xavier_uniform_(m.weight)
-            elif method == "normal":
-                nn.init.normal_(m.weight, mean=0, std=0.01)
-            nn.init.zeros_(m.bias)
-
-def build_optimizer(model, config):
-    opt = config.get("optimizer", "adam").lower()
-    lr = config["lr"]
-    wd = config.get("weight_decay", 0.0)
-    if opt == "adam":
-        return torch.optim.Adam(model.parameters(), lr=lr, weight_decay=wd)
-    elif opt == "sgd":
-        momentum = config.get('momentum', 0.9)
-        return torch.optim.SGD(model.parameters(), lr=lr, weight_decay=wd, momentum=momentum)
-    elif opt == "rmsprop":
-        return torch.optim.RMSprop(model.parameters(), lr=lr, weight_decay=wd)
-    else:
-        raise ValueError(f"Unknown optimizer: {opt}")
-
-def build_scheduler(optimizer, config, epochs):
-    sched = config.get("scheduler", None)
-    if sched is None:
-        return None
-    elif sched == "cosine":
-        return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
-    elif sched == "step":
-        return torch.optim.lr_scheduler.StepLR(optimizer, step_size=epochs // 3, gamma=0.5)
-    elif sched == "exponential":
-        return torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.995)
-    else:
-        raise ValueError(f"Unknown scheduler: {sched}")
-
-def train_fold(model, X_train, y_train, optimizer, criterion, scheduler, epochs):
+def train_fold(model, X_train, y_train, optimizer, criterion):
     model.train()
     X_t = torch.tensor(X_train, dtype=torch.float32)
     y_t = torch.tensor(y_train, dtype=torch.float32)
-    for _ in range(epochs):
+    for _ in range(EPOCHS):
         optimizer.zero_grad()
         pred = model(X_t)
         loss = criterion(pred, y_t)
         loss.backward()
         optimizer.step()
-        if scheduler is not None:
-            scheduler.step()
 
 def eval_fold(model, X_test):
     model.eval()
     with torch.no_grad():
         X_t = torch.tensor(X_test, dtype=torch.float32)
-        preds = model(X_t).numpy()
-    if np.any(np.isnan(preds)):
-        raise ValueError("Model produced NaN predictions — trial skipped.")
-    return preds
+        return model(X_t).numpy()
 
 def compute_metrics(y_true, y_pred):
     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
     mae  = mean_absolute_error(y_true, y_pred)
     r2   = r2_score(y_true, y_pred)
-    std_dev = np.std(y_true - y_pred)
+    residuals = y_true - y_pred
+    std_dev = np.std(residuals)
     return rmse, mae, r2, std_dev
 
 def plot_fold(y_test, y_pred, fold, rmse, r2):
@@ -111,13 +61,7 @@ def plot_aggregated(all_y_test, all_y_pred, rmse, mae, r2, std_dev):
     plt.savefig("pytorch_mlp_aggregated.png", dpi=150)
     plt.close()
 
-def run_kfold(X, y, scaler_fn, config=None, verbose=True):
-    if config is None:
-        config = DEFAULT_CONFIG
-
-    epochs = config.get("epochs", 1500)
-    dropout_rate = config.get("dropout_rate", 0.0)
-
+def run_kfold(X, y, scaler_fn):
     kf = KFold(n_splits=N_SPLITS, shuffle=True, random_state=42)
     criterion = nn.MSELoss()
 
@@ -125,51 +69,45 @@ def run_kfold(X, y, scaler_fn, config=None, verbose=True):
     all_y_pred  = []
     fold_results = []
 
-    if verbose:
-        print(f"{'Fold':<6} | {'RMSE':<10} | {'MAE':<10} | {'R²':<10} | {'Std Dev':<10}")
-        print("-" * 55)
+    print(f"{'Fold':<6} | {'RMSE':<10} | {'MAE':<10} | {'R²':<10} | {'Std Dev':<10}")
+    print("-" * 55)
 
     for fold, (train_idx, test_idx) in enumerate(kf.split(X), 1):
         X_train, X_test = X[train_idx], X[test_idx]
         y_train, y_test = y[train_idx], y[test_idx]
 
-        scaler  = scaler_fn()
+        scaler = scaler_fn()
         X_train = scaler.fit_transform(X_train)
         X_test  = scaler.transform(X_test)
 
-        model = MLPRegressor(input_size=X_train.shape[1], dropout_rate=dropout_rate)
-        init_weights(model, config.get("init", "kaiming"))
-        optimizer = build_optimizer(model, config)
-        scheduler = build_scheduler(optimizer, config, epochs)
+        model     = MLPRegressor(input_size=X_train.shape[1])
+        optimizer = torch.optim.Adam(model.parameters(), lr=LR)
 
-        train_fold(model, X_train, y_train, optimizer, criterion, scheduler, epochs)
+        train_fold(model, X_train, y_train, optimizer, criterion)
         y_pred = eval_fold(model, X_test)
 
         rmse, mae, r2, std_dev = compute_metrics(y_test, y_pred)
         fold_results.append((rmse, mae, r2, std_dev))
 
+        plot_fold(y_test, y_pred, fold, rmse, r2)
+
         all_y_test.extend(y_test)
         all_y_pred.extend(y_pred)
 
-        if verbose:
-            plot_fold(y_test, y_pred, fold, rmse, r2)
-            print(f"#{fold:<5} | {rmse:<10.2f} | {mae:<10.2f} | {r2:<10.4f} | {std_dev:<10.2f}")
+        print(f"#{fold:<5} | {rmse:<10.2f} | {mae:<10.2f} | {r2:<10.4f} | {std_dev:<10.2f}")
 
+    print("-" * 55)
     avg = np.mean(fold_results, axis=0)
+    print(f"{'AVG':<6} | {avg[0]:<10.2f} | {avg[1]:<10.2f} | {avg[2]:<10.4f} | {avg[3]:<10.2f}")
 
     all_y_test = np.array(all_y_test)
     all_y_pred = np.array(all_y_pred)
     rmse, mae, r2, std_dev = compute_metrics(all_y_test, all_y_pred)
+    plot_aggregated(all_y_test, all_y_pred, rmse, mae, r2, std_dev)
 
-    if verbose:
-        print("-" * 55)
-        print(f"{'AVG':<6} | {avg[0]:<10.2f} | {avg[1]:<10.2f} | {avg[2]:<10.4f} | {avg[3]:<10.2f}")
-        plot_aggregated(all_y_test, all_y_pred, rmse, mae, r2, std_dev)
-        print(f"\nAggregated across all folds:")
-        print(f"  RMSE:    {rmse:.2f}°F")
-        print(f"  MAE:     {mae:.2f}°F")
-        print(f"  R²:      {r2:.4f}")
-        print(f"  Std Dev: {std_dev:.2f}°F")
-        print(f"\nRegulatory targets: Welds ≤28°F | Base Metal ≤17°F")
-
-    return rmse
+    print(f"\nAggregated across all folds:")
+    print(f"  RMSE:    {rmse:.2f}°F")
+    print(f"  MAE:     {mae:.2f}°F")
+    print(f"  R²:      {r2:.4f}")
+    print(f"  Std Dev: {std_dev:.2f}°F")
+    print(f"\nRegulatory targets: Welds ≤28°F | Base Metal ≤17°F")
