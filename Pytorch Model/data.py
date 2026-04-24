@@ -2,19 +2,23 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 
-FEATURES = ["%Cu", "%Ni", "%P", "%S", "log_fluence", "RTndt (u) [Initial RTndt]"]
+ALL_FEATURES = ["%Cu", "%Ni", "%P", "%S", "log_fluence", "RTndt (u) [Initial RTndt]", "Cu_LogFluence"]
 TARGET = "ΔRTndt"
 
-def load_data(filepath="rvid2.xlsx"):
+def load_data(filepath="../rvid2.xlsx", selected_features=None):
     df = pd.read_excel(filepath, sheet_name="RVID2")
     df.columns = df.columns.str.strip()
 
-    raw_features = ["%Cu", "%Ni", "%P", "%S", "f at EOL 1/4T", "RTndt (u) [Initial RTndt]"]
-    df = df[raw_features + [TARGET]].dropna()
+    raw_cols = ["%Cu", "%Ni", "%P", "%S", "f at EOL 1/4T", "RTndt (u) [Initial RTndt]", TARGET]
+    df = df[raw_cols].dropna()
 
-    df["log_fluence"] = np.log(df["f at EOL 1/4T"])
+    df["log_fluence"]    = np.log(df["f at EOL 1/4T"])
+    df["Cu_LogFluence"]  = df["%Cu"] * df["log_fluence"]
 
-    X = df[FEATURES].values
+    if selected_features is None:
+        selected_features = ALL_FEATURES
+
+    X = df[selected_features].values
     y = df[TARGET].values
 
     return X, y
